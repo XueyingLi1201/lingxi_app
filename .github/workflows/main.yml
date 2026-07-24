@@ -16,10 +16,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Flet
+      - name: Install Flet (skip unnecessary deps)
         run: |
-          pip install flet
-          pip install openai requests websockets pyaudio
+          pip install flet --no-deps
+          pip install openai requests websockets
+          pip install pyaudio --no-deps || true
 
       - name: Install Flutter
         run: |
