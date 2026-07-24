@@ -35,7 +35,7 @@ jobs:
 
       - name: Build APK
         run: |
-          flet build apk --org com.yourcompany.lingxi
+          yes | flet build apk --org com.yourcompany.lingxi
           ls -la build/app/outputs/flutter-apk/
 
       - name: Upload APK
