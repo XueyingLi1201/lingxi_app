@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Flet (skip unnecessary deps)
+      - name: Install Flet
         run: |
           pip install flet --no-deps
           pip install openai requests websockets
@@ -35,7 +35,7 @@ jobs:
 
       - name: Build APK
         run: |
-          yes | flet build apk --org com.yourcompany.lingxi
+          yes | flet build apk --org com.yourcompany.lingxi --module-name lingxi_app
           ls -la build/app/outputs/flutter-apk/
 
       - name: Upload APK
