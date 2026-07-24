@@ -1,0 +1,44 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Flet
+        run: |
+          pip install flet
+          pip install openai requests websockets pyaudio
+
+      - name: Install Flutter
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl git unzip xz-utils zip libglu1-mesa
+          git clone https://github.com/flutter/flutter.git -b stable
+          echo "$PWD/flutter/bin" >> $GITHUB_PATH
+
+      - name: Accept Android licenses
+        run: |
+          yes | flutter doctor --android-licenses
+
+      - name: Build APK
+        run: |
+          flet build apk --org com.yourcompany.lingxi
+          ls -la build/app/outputs/flutter-apk/
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: lingxi-apk
+          path: build/app/outputs/flutter-apk/*.apk
