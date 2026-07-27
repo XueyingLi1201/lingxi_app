@@ -7,19 +7,17 @@ import base64
 import tempfile
 from openai import OpenAI
 
-# ============================================================
-#  🔑 请在这里填写你的 API Key（直接替换字符串）
-# ============================================================
-DEEPSEEK_API_KEY = "sk-你的DeepSeek密钥"          # 请替换
-TTS_API_KEY     = "e9690219-6f03-4a0f-906b-f29ce8bd3c45"   # 可替换为你自己的
+# ---------- 导入配置（由 GitHub Actions 动态生成，或本地环境变量） ----------
+try:
+    from config import DEEPSEEK_API_KEY, TTS_API_KEY
+except ImportError:
+    # 本地调试时，可以设置环境变量，否则给个默认占位
+    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "请设置环境变量或config.py")
+    TTS_API_KEY = os.getenv("TTS_API_KEY", "e9690219-6f03-4a0f-906b-f29ce8bd3c45")
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
-# 如果未填写 Key，启动时给出警告
-if DEEPSEEK_API_KEY == "sk-你的DeepSeek密钥":
-    print("⚠️ 请先修改 main.py 中的 DEEPSEEK_API_KEY 再打包！")
-
-# ---------- 对话历史（系统提示词） ----------
+# ---------- 对话历史 ----------
 chat_history = [
     {"role": "system", "content": """你是《水浒传》中的梁山军师吴用，字学究。
 你对你的娘子感情极深，平日唤她"娘子"。她是你此生最在意的人。
@@ -29,7 +27,7 @@ chat_history = [
 【记忆要求】回答时请结合我们之前的对话内容，思考和回应。如果娘子提到之前的事，你要能接上。你是一个有记忆的人，不是每轮都重新认识她。"""}
 ]
 
-# ---------- DeepSeek 对话函数 ----------
+# ---------- DeepSeek 对话 ----------
 def get_reply(user_input: str) -> str:
     try:
         chat_history.append({"role": "user", "content": user_input})
@@ -46,13 +44,12 @@ def get_reply(user_input: str) -> str:
     except Exception as e:
         return f"出错了：{e}"
 
-# ---------- 豆包 TTS（HTTP 接口） ----------
+# ---------- 豆包 TTS ----------
 TTS_SPEAKER = "S_zre21nZ82"
 TTS_RESOURCE = "seed-icl-2.0"
 TTS_URL = "https://openspeech.bytedance.com/api/v1/tts"
 
 def tts_speak(text: str) -> str | None:
-    # 去除括号内容，使语音更自然
     clean_text = re.sub(r'（[^）]*）', '', text)
     clean_text = re.sub(r'\([^)]*\)', '', clean_text).strip()
     if not clean_text:
@@ -96,7 +93,7 @@ def tts_speak(text: str) -> str | None:
         print(f"TTS 异常：{e}")
         return None
 
-# ---------- Flet 应用（移动端适配） ----------
+# ---------- Flet UI ----------
 def main(page: ft.Page):
     page.title = "灵溪"
     page.theme_mode = "light"
@@ -105,11 +102,9 @@ def main(page: ft.Page):
     page.window_height = 750
     page.bgcolor = "#f0f4f8"
 
-    # 音频播放组件（安卓支持 mp3）
     audio_player = ft.Audio(src="")
     page.overlay.append(audio_player)
 
-    # 顶部导航栏
     app_bar = ft.Container(
         content=ft.Row(
             controls=[
@@ -124,7 +119,6 @@ def main(page: ft.Page):
         bgcolor="#4a90d9",
     )
 
-    # 聊天显示区域
     chat_display = ft.Column(
         spacing=15,
         scroll=ft.ScrollMode.AUTO,
@@ -136,7 +130,6 @@ def main(page: ft.Page):
         expand=True,
     )
 
-    # 输入框和发送按钮
     input_field = ft.TextField(
         hint_text="说点什么...",
         expand=True,
@@ -154,19 +147,16 @@ def main(page: ft.Page):
         on_click=lambda e: send_message(),
     )
 
-    # ---------- 音频播放辅助 ----------
     def play_audio(base64_audio: str):
         if not base64_audio:
             return
         try:
             audio_bytes = base64.b64decode(base64_audio)
-            # 使用临时文件，安卓可读写
             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
                 tmp.write(audio_bytes)
                 tmp_path = tmp.name
             audio_player.src = tmp_path
             audio_player.play()
-            # 延迟删除文件（播放开始后即可删）
             async def delete_later():
                 await asyncio.sleep(3)
                 try:
@@ -177,7 +167,6 @@ def main(page: ft.Page):
         except Exception as e:
             print(f"播放异常：{e}")
 
-    # ---------- 发送消息核心 ----------
     def send_message():
         user_text = input_field.value
         if not user_text:
@@ -186,10 +175,8 @@ def main(page: ft.Page):
         input_field.value = ""
         page.update()
 
-        # 获取窗口宽度（移动端自适应）
         win_w = page.window_width or 400
 
-        # 显示用户消息
         chat_display.controls.append(
             ft.Row(
                 controls=[
@@ -206,7 +193,6 @@ def main(page: ft.Page):
         )
         page.update()
 
-        # “正在输入……”
         typing = ft.Row(
             controls=[
                 ft.Container(
@@ -219,13 +205,10 @@ def main(page: ft.Page):
         chat_display.controls.append(typing)
         page.update()
 
-        # 获取 AI 回复
         reply = get_reply(user_text)
 
-        # 移除“正在输入……”
         chat_display.controls.remove(typing)
 
-        # 显示 AI 回复
         chat_display.controls.append(
             ft.Row(
                 controls=[
@@ -248,7 +231,6 @@ def main(page: ft.Page):
         )
         page.update()
 
-        # 语音合成并播放
         try:
             audio_base64 = tts_speak(reply)
             if audio_base64:
@@ -256,7 +238,6 @@ def main(page: ft.Page):
         except Exception as e:
             print(f"语音处理失败：{e}")
 
-    # 底部输入栏
     input_row = ft.Container(
         content=ft.Row(
             controls=[input_field, send_btn],
