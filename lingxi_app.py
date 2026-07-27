@@ -1,26 +1,22 @@
-﻿import flet as ft
+import flet as ft
 import re
 import asyncio
-import json
-import struct
-import uuid
-import websockets
-import pyaudio
+import os
 import requests
 import base64
 import tempfile
-import os
-import time
 from openai import OpenAI
 
-# ============================================================
-#  🔑 DeepSeek 配置
-# ============================================================
-import os
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+# ---------- 导入配置（由 GitHub Actions 动态生成，或本地环境变量） ----------
+try:
+    from config import DEEPSEEK_API_KEY, TTS_API_KEY
+except ImportError:
+    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "请设置环境变量或config.py")
+    TTS_API_KEY = os.getenv("TTS_API_KEY", "e9690219-6f03-4a0f-906b-f29ce8bd3c45")
+
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 
-# 全局对话历史（自动记忆）
+# ---------- 对话历史 ----------
 chat_history = [
     {"role": "system", "content": """你是《水浒传》中的梁山军师吴用，字学究。
 你对你的娘子感情极深，平日唤她"娘子"。她是你此生最在意的人。
@@ -30,8 +26,8 @@ chat_history = [
 【记忆要求】回答时请结合我们之前的对话内容，思考和回应。如果娘子提到之前的事，你要能接上。你是一个有记忆的人，不是每轮都重新认识她。"""}
 ]
 
+# ---------- DeepSeek 对话 ----------
 def get_reply(user_input: str) -> str:
-    """调用 DeepSeek 获取回复，自动保存对话历史"""
     try:
         chat_history.append({"role": "user", "content": user_input})
         client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
@@ -47,155 +43,56 @@ def get_reply(user_input: str) -> str:
     except Exception as e:
         return f"出错了：{e}"
 
-# ============================================================
-#  🔑 豆包 TTS 配置（你之前已验证可用）
-# ============================================================
-TTS_API_KEY = "e9690219-6f03-4a0f-906b-f29ce8bd3c45"
+# ---------- 豆包 TTS ----------
 TTS_SPEAKER = "S_zre21nZ82"
 TTS_RESOURCE = "seed-icl-2.0"
-TTS_WS_URL = "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
+TTS_URL = "https://openspeech.bytedance.com/api/v1/tts"
 
-FORMAT = pyaudio.paInt16
-CHANNELS = 1
-RATE = 24000
-CHUNK = 2048
-
-EVENT_START_CONNECTION = 1
-EVENT_START_SESSION = 100
-EVENT_TASK_REQUEST = 200
-EVENT_FINISH_SESSION = 102
-EVENT_FINISH_CONNECTION = 2
-EVENT_SESSION_FINISHED = 152
-EVENT_TTS_RESPONSE = 352
-
-# ============================================================
-#  TTS 函数（与 voice_chat_final.py 一致）
-# ============================================================
-def build_frame(event, payload=b'', session_id=None):
-    header = bytearray(8)
-    header[0] = 0x11
-    header[1] = 0x14
-    header[2] = 0x10
-    header[3] = 0x00
-    struct.pack_into('>I', header, 4, event)
-
-    if session_id:
-        session_id_bytes = session_id.encode('utf-8')
-        header += struct.pack('>I', len(session_id_bytes))
-        header += session_id_bytes
-
-    if payload:
-        payload_bytes = payload.encode('utf-8') if isinstance(payload, str) else payload
-        header += struct.pack('>I', len(payload_bytes))
-        header += payload_bytes
-
-    return header
-
-async def tts_producer(websocket, session_id, text_queue):
-    while True:
-        text = await text_queue.get()
-        if text is None:
-            finish_session_frame = build_frame(EVENT_FINISH_SESSION, session_id=session_id, payload="{}")
-            await websocket.send(finish_session_frame)
-            break
-        task_payload = json.dumps({
-            "req_params": {
-                "text": text
-            }
-        })
-        task_frame = build_frame(EVENT_TASK_REQUEST, session_id=session_id, payload=task_payload)
-        await websocket.send(task_frame)
-
-async def tts_consumer(websocket, audio_stream):
-    while True:
-        message = await websocket.recv()
-        if not isinstance(message, bytes):
-            continue
-        if len(message) < 12:
-            continue
-        header = message[:8]
-        event = struct.unpack('>I', header[4:8])[0]
-        if event == EVENT_TTS_RESPONSE:
-            pos = 8
-            if len(message) >= pos + 4:
-                session_id_len = struct.unpack('>I', message[pos:pos+4])[0]
-                pos += 4 + session_id_len
-                if len(message) >= pos + 4:
-                    payload_len = struct.unpack('>I', message[pos:pos+4])[0]
-                    pos += 4
-                    audio_data = message[pos:pos+payload_len]
-                    if audio_data:
-                        audio_stream.write(audio_data)
-            else:
-                audio_data = message[24:]
-                if audio_data:
-                    audio_stream.write(audio_data)
-        elif event == EVENT_SESSION_FINISHED:
-            break
-
-def clean_text(text):
-    text = re.sub(r'（[^）]*）', '', text)
-    text = re.sub(r'\([^)]*\)', '', text)
-    return text.strip()
-
-async def tts_async(text):
-    """异步合成并播放语音"""
-    clean_text = re.sub(r'[（(][^）)]*[）)]', '', text).strip()
+def tts_speak(text: str) -> str | None:
+    clean_text = re.sub(r'（[^）]*）', '', text)
+    clean_text = re.sub(r'\([^)]*\)', '', clean_text).strip()
     if not clean_text:
-        return
+        return None
 
-    p = pyaudio.PyAudio()
-    stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, output=True, frames_per_buffer=CHUNK)
+    headers = {
+        "X-Api-Key": TTS_API_KEY,
+        "X-Api-Resource-Id": TTS_RESOURCE,
+        "Content-Type": "application/json"
+    }
+    data = {
+        "app": {
+            "appid": "6998792772",
+            "cluster": "volcano_tts"
+        },
+        "user": {"uid": "wuyong_user"},
+        "audio": {
+            "voice_type": TTS_SPEAKER,
+            "encoding": "mp3",
+            "speed_ratio": 1.0,
+            "volume_ratio": 1.0
+        },
+        "request": {
+            "reqid": os.urandom(8).hex(),
+            "text": clean_text,
+            "text_type": "plain",
+            "operation": "query",
+            "with_frontend": 1,
+            "frontend_type": "unitTson"
+        }
+    }
 
     try:
-        headers = {
-            "X-Api-Key": TTS_API_KEY,
-            "X-Api-Resource-Id": TTS_RESOURCE
-        }
-        async with websockets.connect(TTS_WS_URL, additional_headers=headers) as websocket:
-            start_conn_frame = build_frame(EVENT_START_CONNECTION, payload="{}")
-            await websocket.send(start_conn_frame)
-
-            session_id = "session-" + str(uuid.uuid4())
-            session_payload = json.dumps({
-                "user": {"uid": "wuyong_user"},
-                "req_params": {
-                    "speaker": TTS_SPEAKER,
-                    "audio_params": {
-                        "format": "pcm",
-                        "sample_rate": RATE,
-                        "speech_rate": 0
-                    }
-                }
-            })
-            start_session_frame = build_frame(EVENT_START_SESSION, session_id=session_id, payload=session_payload)
-            await websocket.send(start_session_frame)
-
-            sentences = re.split(r'(?<=[。！？.!?])', clean_text)
-            text_queue = asyncio.Queue()
-            for sent in sentences:
-                if sent.strip():
-                    await text_queue.put(sent.strip())
-            await text_queue.put(None)
-
-            await asyncio.gather(
-                tts_producer(websocket, session_id, text_queue),
-                tts_consumer(websocket, stream)
-            )
-
-            finish_conn_frame = build_frame(EVENT_FINISH_CONNECTION, payload="{}")
-            await websocket.send(finish_conn_frame)
-
+        response = requests.post(TTS_URL, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            return response.json().get("data")
+        else:
+            print(f"TTS 失败：{response.status_code}")
+            return None
     except Exception as e:
-        print(f"TTS 错误：{e}")
-    finally:
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
+        print(f"TTS 异常：{e}")
+        return None
 
-# ============================================================
-#  Flet 应用
-# ============================================================
+# ---------- Flet UI ----------
 def main(page: ft.Page):
     page.title = "灵溪"
     page.theme_mode = "light"
@@ -203,6 +100,9 @@ def main(page: ft.Page):
     page.window_width = 420
     page.window_height = 750
     page.bgcolor = "#f0f4f8"
+
+    audio_player = ft.Audio(src="")
+    page.overlay.append(audio_player)
 
     app_bar = ft.Container(
         content=ft.Row(
@@ -223,7 +123,6 @@ def main(page: ft.Page):
         scroll=ft.ScrollMode.AUTO,
         expand=True,
     )
-
     chat_wrapper = ft.Container(
         content=chat_display,
         padding=10,
@@ -239,7 +138,6 @@ def main(page: ft.Page):
         border_color="#4a90d9",
         on_submit=lambda e: send_message(),
     )
-
     send_btn = ft.Container(
         content=ft.Text("发送", color="white", size=14, weight="bold"),
         bgcolor="#4a90d9",
@@ -247,6 +145,26 @@ def main(page: ft.Page):
         border_radius=20,
         on_click=lambda e: send_message(),
     )
+
+    def play_audio(base64_audio: str):
+        if not base64_audio:
+            return
+        try:
+            audio_bytes = base64.b64decode(base64_audio)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+                tmp.write(audio_bytes)
+                tmp_path = tmp.name
+            audio_player.src = tmp_path
+            audio_player.play()
+            async def delete_later():
+                await asyncio.sleep(3)
+                try:
+                    os.unlink(tmp_path)
+                except:
+                    pass
+            asyncio.create_task(delete_later())
+        except Exception as e:
+            print(f"播放异常：{e}")
 
     def send_message():
         user_text = input_field.value
@@ -256,6 +174,8 @@ def main(page: ft.Page):
         input_field.value = ""
         page.update()
 
+        win_w = page.window_width or 400
+
         chat_display.controls.append(
             ft.Row(
                 controls=[
@@ -264,7 +184,7 @@ def main(page: ft.Page):
                         bgcolor="#d1e7ff",
                         padding=15,
                         border_radius=20,
-                        width=page.window_width * 0.7,
+                        width=win_w * 0.7,
                     )
                 ],
                 alignment=ft.MainAxisAlignment.END,
@@ -301,7 +221,7 @@ def main(page: ft.Page):
                         bgcolor="white",
                         padding=15,
                         border_radius=20,
-                        width=page.window_width * 0.65,
+                        width=win_w * 0.65,
                     ),
                 ],
                 alignment=ft.MainAxisAlignment.START,
@@ -311,9 +231,11 @@ def main(page: ft.Page):
         page.update()
 
         try:
-            asyncio.create_task(tts_async(reply))
+            audio_base64 = tts_speak(reply)
+            if audio_base64:
+                play_audio(audio_base64)
         except Exception as e:
-            print(f"语音播放失败：{e}")
+            print(f"语音处理失败：{e}")
 
     input_row = ft.Container(
         content=ft.Row(
