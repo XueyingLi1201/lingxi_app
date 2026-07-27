@@ -36,7 +36,7 @@ jobs:
       - name: Build APK
         run: |
           yes | flet build apk --org com.yourcompany.lingxi --module-name lingxi_app
-          ls -la build/app/outputs/flutter-apk/
+          ls -la build/apk/
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
 
@@ -44,4 +44,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lingxi-apk
-          path: build/app/outputs/flutter-apk/*.apk
+          path: build/apk/*.apk
