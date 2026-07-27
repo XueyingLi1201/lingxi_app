@@ -1,0 +1,61 @@
+name: Build Flet Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+  JAVA_VERSION: '17'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          else
+            pip install flet
+          fi
+          pip list
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: 'gradle'
+
+      # 🔑 关键步骤：生成 config.py，从 Secrets 注入 API Key
+      - name: Inject API Keys
+        run: |
+          cat > config.py <<EOF
+          # 由 GitHub Actions 自动生成，请勿手动编辑
+          DEEPSEEK_API_KEY = "${{ secrets.DEEPSEEK_API_KEY }}"
+          TTS_API_KEY = "${{ secrets.TTS_API_KEY || 'e9690219-6f03-4a0f-906b-f29ce8bd3c45' }}"
+          EOF
+
+      - name: Build APK
+        run: |
+          flet build apk --verbose
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lingxi-App
+          path: build/apk
