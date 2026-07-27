@@ -41,11 +41,11 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: 'gradle'
 
-      # 🔑 关键步骤：生成 config.py，从 Secrets 注入 API Key
+      # 🔑 注入 API Key（从 Secrets 读取）
       - name: Inject API Keys
         run: |
           cat > config.py <<EOF
-          # 由 GitHub Actions 自动生成，请勿手动编辑
+          # 由 GitHub Actions 自动生成
           DEEPSEEK_API_KEY = "${{ secrets.DEEPSEEK_API_KEY }}"
           TTS_API_KEY = "${{ secrets.TTS_API_KEY || 'e9690219-6f03-4a0f-906b-f29ce8bd3c45' }}"
           EOF
