@@ -7,7 +7,7 @@ on:
 
 env:
   PYTHON_VERSION: '3.11'
-  FLUTTER_VERSION: '3.22.0'   # 选择一个稳定版本
+  FLUTTER_VERSION: '3.22.0'
 
 jobs:
   build:
@@ -34,7 +34,6 @@ jobs:
           fi
           pip list
 
-      # 🔧 安装 Flutter（关键！）
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -44,16 +43,13 @@ jobs:
       - name: Check Flutter
         run: flutter doctor -v
 
-      # ☕ 安装 Java（Android 构建需要）
+      # ☕ 安装 Java（不配置缓存，避免错误）
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
-          # 禁用缓存，避免找不到 Gradle 文件的错误（因为后面会由 Flutter 生成）
-          cache: 'none'
 
-      # 🔑 注入 API Key
       - name: Inject API Keys
         run: |
           cat > config.py <<EOF
@@ -62,7 +58,6 @@ jobs:
           TTS_API_KEY = "${{ secrets.TTS_API_KEY || 'e9690219-6f03-4a0f-906b-f29ce8bd3c45' }}"
           EOF
 
-      # 🚀 构建 APK
       - name: Build APK
         run: |
           flet build apk --entry-file lingxi_app.py --verbose
